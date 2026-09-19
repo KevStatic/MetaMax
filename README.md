@@ -2,6 +2,8 @@
 
 <img width="8450" height="4738" alt="image" src="https://github.com/user-attachments/assets/9b376b34-8626-419b-b7bf-121a35907bbd" />
 
+Test website that has been deployed on https://www.meta-max.xyz/deploy the subnet created of the product is https://694a723b7ab7.meta-max.xyz/ (Github repo link which we take for test: https://github.com/Madxfury/ETH-Transparency)
+
 
 Production setup for meta-max.xyz: see [deployment guide](docs/production.md). Monad contracts and production credentials must be configured before paid workloads are available.
 
