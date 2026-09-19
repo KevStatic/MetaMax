@@ -1,0 +1,10 @@
+.env*
+**/.env*
+**/node_modules/**
+**/.next/**
+**/artifacts/**
+**/cache/**
+*.log
+/backend/
+/contracts/
+/integrations/

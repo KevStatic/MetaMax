@@ -1,0 +1,123 @@
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: comput3
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: comput3
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U comput3 -d comput3"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  dind:
+    image: docker:27-dind
+    privileged: true
+    restart: unless-stopped
+    environment:
+      DOCKER_TLS_CERTDIR: ""
+    command: ["dockerd", "--host=tcp://0.0.0.0:2375", "--tls=false"]
+    ports:
+      - "127.0.0.1:2375:2375"
+    volumes:
+      - dind_data:/var/lib/docker
+    healthcheck:
+      test: ["CMD", "docker", "-H", "tcp://localhost:2375", "info"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      dind:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://comput3:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/comput3
+      DOCKER_HOST: tcp://dind:2375
+      PORT: "8080"
+      JWT_SECRET: ${JWT_SECRET}
+      VAULT_MASTER_SECRET: ${VAULT_MASTER_SECRET}
+      GROQ_API_KEY: ${GROQ_API_KEY}
+      AGENT_MODEL: ${AGENT_MODEL:-llama-3.3-70b-versatile}
+      SCAN_MODEL: ${SCAN_MODEL:-llama-3.3-70b-versatile}
+      MONAD_TESTNET_RPC_URL: ${MONAD_TESTNET_RPC_URL:-https://testnet-rpc.monad.xyz}
+      AGENT_WALLET_PRIVATE_KEY: ${AGENT_WALLET_PRIVATE_KEY}
+      ESCROW_DEPOSIT_MON: ${ESCROW_DEPOSIT_MON:-0.01}
+      PROVIDER_REGISTRY_ADDRESS: ${PROVIDER_REGISTRY_ADDRESS}
+      DEPLOYMENT_ESCROW_ADDRESS: ${DEPLOYMENT_ESCROW_ADDRESS}
+      JOB_AUCTION_ADDRESS: ${JOB_AUCTION_ADDRESS}
+      EXECUTION_ATTESTATION_ADDRESS: ${EXECUTION_ATTESTATION_ADDRESS}
+      DEPLOY_DOMAIN: ${DEPLOY_DOMAIN}
+      ZG_RPC_URL: ${ZG_RPC_URL:-https://evmrpc-testnet.0g.ai}
+      ZG_PRIVATE_KEY: ${ZG_PRIVATE_KEY}
+      ZG_FLOW_ADDRESS: ${ZG_FLOW_ADDRESS}
+      AXL_ENDPOINT: ${AXL_ENDPOINT}
+      AXL_PEER_ID: ${AXL_PEER_ID}
+      KEEPERHUB_ENDPOINT: ${KEEPERHUB_ENDPOINT}
+      PAYMENTS_DISABLED: ${PAYMENTS_DISABLED:-false}
+      PROVIDER_MODE: ${PROVIDER_MODE:-false}
+      PROVIDER_WALLET_PRIVATE_KEY: ${PROVIDER_WALLET_PRIVATE_KEY}
+      KEEPERHUB_PRIVATE_KEY: ${KEEPERHUB_PRIVATE_KEY}
+    ports:
+      - "127.0.0.1:${BACKEND_HOST_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    volumes:
+      - /tmp/comput3:/tmp/comput3
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        BACKEND_INTERNAL_URL: http://backend:8080
+        NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID: ${NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID}
+        NEXT_PUBLIC_PROVIDER_REGISTRY_ADDRESS: ${PROVIDER_REGISTRY_ADDRESS}
+        NEXT_PUBLIC_DEPLOYMENT_ESCROW_ADDRESS: ${DEPLOYMENT_ESCROW_ADDRESS}
+        NEXT_PUBLIC_JOB_AUCTION_ADDRESS: ${JOB_AUCTION_ADDRESS}
+        NEXT_PUBLIC_EXECUTION_ATTESTATION_ADDRESS: ${EXECUTION_ATTESTATION_ADDRESS}
+        NEXT_PUBLIC_MONAD_TESTNET_RPC_URL: ${NEXT_PUBLIC_MONAD_TESTNET_RPC_URL:-https://testnet-rpc.monad.xyz}
+        NEXT_PUBLIC_GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID}
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET}
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8080}
+      NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID: ${NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID}
+      NEXT_PUBLIC_MONAD_TESTNET_RPC_URL: ${NEXT_PUBLIC_MONAD_TESTNET_RPC_URL:-https://testnet-rpc.monad.xyz}
+      NEXT_PUBLIC_PROVIDER_REGISTRY_ADDRESS: ${PROVIDER_REGISTRY_ADDRESS}
+      NEXT_PUBLIC_DEPLOYMENT_ESCROW_ADDRESS: ${DEPLOYMENT_ESCROW_ADDRESS}
+      NEXT_PUBLIC_JOB_AUCTION_ADDRESS: ${JOB_AUCTION_ADDRESS}
+      NEXT_PUBLIC_EXECUTION_ATTESTATION_ADDRESS: ${EXECUTION_ATTESTATION_ADDRESS}
+    ports:
+      - "127.0.0.1:3000:3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  postgres_data:
+  dind_data:

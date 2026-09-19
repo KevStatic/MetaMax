@@ -1,0 +1,10 @@
+# Temporary public API URL. Restarting this tunnel may change its URL.
+# For a stable production URL, replace it with a named Cloudflare Tunnel.
+services:
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --no-autoupdate --url http://backend:8080
+    depends_on:
+      backend:
+        condition: service_healthy

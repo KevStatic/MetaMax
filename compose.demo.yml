@@ -1,0 +1,16 @@
+# Public demo URL for judges.
+#
+# The browser only ever needs the frontend: Next.js rewrites /api/backend/* to
+# http://backend:8080 over the internal Docker network (see next.config.ts), so
+# a single public hostname serves the whole app, API and websockets included.
+#
+# Quick tunnels are ephemeral — the URL changes whenever this container
+# restarts. For a stable URL, use a named Cloudflare Tunnel instead.
+services:
+  web:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --no-autoupdate --url http://frontend:3000
+    depends_on:
+      frontend:
+        condition: service_healthy

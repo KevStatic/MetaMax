@@ -1,0 +1,30 @@
+{
+  "name": "metamax-contracts",
+  "version": "1.0.0",
+  "description": "MetaMax smart contracts — ProviderRegistry, DeploymentEscrow, JobAuction",
+  "main": "index.js",
+  "scripts": {
+    "compile": "hardhat compile",
+    "test": "hardhat test",
+    "deploy:local": "hardhat run scripts/deploy.ts --network hardhat",
+    "deploy:monadTestnet": "hardhat run scripts/deploy.ts --network monadTestnet",
+    "export:abis": "hardhat run scripts/export-abis.ts",
+    "verify:monadTestnet": "hardhat verify --network monadTestnet",
+    "become-provider": "hardhat run scripts/become-provider.ts --network monadTestnet"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^6.1.2",
+    "@types/node": "^25.6.0",
+    "dotenv": "^17.4.1",
+    "hardhat": "^2.28.6",
+    "ts-node": "^10.9.2",
+    "typescript": "^6.0.2"
+  },
+  "dependencies": {
+    "@openzeppelin/contracts": "^5.6.1"
+  }
+}

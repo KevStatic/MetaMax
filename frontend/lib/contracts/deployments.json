@@ -1,0 +1,8 @@
+{
+  "monadTestnet": {
+    "ProviderRegistry": "",
+    "DeploymentEscrow": "",
+    "JobAuction": "",
+    "ExecutionAttestation": ""
+  }
+}
