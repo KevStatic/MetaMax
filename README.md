@@ -4,6 +4,19 @@
 
 Test website that has been deployed on https://www.meta-max.xyz/deploy the subnet created of the product is https://694a723b7ab7.meta-max.xyz/ (Github repo link which we take for test: https://github.com/Madxfury/ETH-Transparency)
 
+### Transaction Details
+
+**Transaction Hash:**  
+`0x7abd4046e5768a5fb181255a3859af07253f3bf02fa745be6a157d15b74cac87`
+
+**From:**  
+`0x37f0cd7773109d80d13C7Cca85D2d3876AC1b11b`
+
+**To:**  
+`0x22a902db2C601b98145Ac8995dB22369458636Ec`
+
+<img width="1352" height="375" alt="image" src="https://github.com/user-attachments/assets/40319c6e-39e5-41d4-936a-eb3fded39d26" />
+
 
 Production setup for meta-max.xyz: see [deployment guide](docs/production.md). Monad contracts and production credentials must be configured before paid workloads are available.
 
