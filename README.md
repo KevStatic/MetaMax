@@ -1,5 +1,8 @@
 # MetaMax
 
+<img width="8450" height="4738" alt="image" src="https://github.com/user-attachments/assets/9b376b34-8626-419b-b7bf-121a35907bbd" />
+
+
 Production setup for meta-max.xyz: see [deployment guide](docs/production.md). Monad contracts and production credentials must be configured before paid workloads are available.
 
 **Trustless decentralized compute for AI agents — private by default, verifiable by design.**
