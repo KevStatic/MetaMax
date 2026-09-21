@@ -55,8 +55,24 @@ func sessionTopic(sessionID string) string { return "comput3.session." + session
 // delegateCompute publishes a subtask to the session topic and waits for a
 // peer agent to return a result. It returns an error when no peer answers in
 // time, which lets the caller fall back to local execution.
-func (s *Session) delegateCompute(ctx context.Context, command, image string) (map[string]any, error) {
+// delegationEnabled reports whether the AXL client can actually reach a peer.
+//
+// When AXL_ENDPOINT / AXL_PEER_ID are unset the constructor hands back a no-op
+// client, and that is still a non-nil Client — so a plain nil check passes and
+// the agent waits out the full DelegationTimeout for a reply nothing will ever
+// send. Clients that do not report themselves are assumed to work.
+func (s *Session) delegationEnabled() bool {
 	if s.axl == nil {
+		return false
+	}
+	if c, ok := s.axl.(interface{ Enabled() bool }); ok {
+		return c.Enabled()
+	}
+	return true
+}
+
+func (s *Session) delegateCompute(ctx context.Context, command, image string) (map[string]any, error) {
+	if !s.delegationEnabled() {
 		return nil, fmt.Errorf("agent-to-agent delegation is not configured on this node")
 	}
 

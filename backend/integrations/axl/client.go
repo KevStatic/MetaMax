@@ -35,6 +35,11 @@ type NoopClient struct{}
 func (NoopClient) Publish(_ context.Context, _ string, _ []byte) error        { return nil }
 func (NoopClient) Subscribe(_ context.Context, _ string, _ func([]byte)) error { return nil }
 
+// Enabled reports that this client cannot actually reach a peer, so callers can
+// skip work that would only time out. A no-op client is still a non-nil Client,
+// which a plain nil check cannot tell apart from a working one.
+func (NoopClient) Enabled() bool { return false }
+
 // envelope is the JSON wrapper sent over the AXL wire so the receiver can
 // filter by topic without inspecting the opaque msg payload.
 type envelope struct {

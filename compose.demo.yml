@@ -4,13 +4,18 @@
 # http://backend:8080 over the internal Docker network (see next.config.ts), so
 # a single public hostname serves the whole app, API and websockets included.
 #
+# --protocol http2 pins the edge connection to TCP. The default (quic/UDP) kept
+# dropping on this network — "datagram manager error: no recent network
+# activity" — and every reconnect 502s whatever request is in flight, which on
+# a live demo lands on a repo scan or a deploy stream.
+#
 # Quick tunnels are ephemeral — the URL changes whenever this container
-# restarts. For a stable URL, use a named Cloudflare Tunnel instead.
+# restarts. For a stable URL, use a named Cloudflare Tunnel.
 services:
   web:
     image: cloudflare/cloudflared:latest
     restart: unless-stopped
-    command: tunnel --no-autoupdate --url http://frontend:3000
+    command: tunnel --no-autoupdate --protocol http2 --url http://frontend:3000
     depends_on:
       frontend:
         condition: service_healthy

@@ -1,19 +1,20 @@
 package scanner
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
-	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/shreejaykurhade/MetaMax/backend/internal/groq"
 )
+
 
 // StackComponent is a detected technology component.
 type StackComponent struct {
@@ -71,7 +72,7 @@ type Scanner struct {
 // New returns a Scanner backed by the Groq API (OpenAI-compatible).
 func New(apiKey, model string) *Scanner {
 	if model == "" {
-		model = "llama-3.3-70b-versatile"
+		model = "openai/gpt-oss-120b"
 	}
 	return &Scanner{apiKey: apiKey, model: model}
 }
@@ -150,6 +151,11 @@ func collectFiles(root string) ([]repoFile, error) {
 		"hardhat.config.js", "hardhat.config.ts", "foundry.toml",
 		"next.config.js", "next.config.ts",
 		"vite.config.js", "vite.config.ts",
+		// Without a manifest for the language it is actually written in, the
+		// model is left guessing from the repo name and README — which is how
+		// a C# solution gets reported back as a Next.js app.
+		"Cargo.toml", "composer.json", "Gemfile", "pom.xml",
+		"build.gradle", "build.gradle.kts", "global.json",
 		".env.example", ".env.sample", "README.md",
 	}
 
@@ -165,6 +171,7 @@ func collectFiles(root string) ([]repoFile, error) {
 	}
 
 	solCount := 0
+	projCount := 0
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return nil
@@ -195,9 +202,26 @@ func collectFiles(root string) ([]repoFile, error) {
 				solCount++
 			}
 		}
+		// Project files for the compiled ecosystems live in subdirectories
+		// rather than at the root, so they are only reachable from the walk.
+		// The .NET ones carry the TargetFramework the image has to match.
+		if projCount < 8 {
+			switch ext {
+			case ".csproj", ".fsproj", ".vbproj", ".sln", ".slnx":
+				if content, err := readTruncated(path, 3000); err == nil {
+					files = append(files, repoFile{Path: rel, Content: content})
+					seen[rel] = true
+					projCount++
+					return nil
+				}
+			}
+		}
 		if base == "package.json" || base == "hardhat.config.js" ||
 			base == "hardhat.config.ts" || base == "foundry.toml" ||
-			base == "requirements.txt" || base == "go.mod" {
+			base == "requirements.txt" || base == "go.mod" ||
+			base == "pom.xml" || base == "build.gradle" ||
+			base == "build.gradle.kts" || base == "Gemfile" ||
+			base == "composer.json" || base == "Cargo.toml" {
 			if content, err := readTruncated(path, 3000); err == nil {
 				files = append(files, repoFile{Path: rel, Content: content})
 				seen[rel] = true
@@ -262,7 +286,10 @@ Rules:
   with a web/ and api/ folder yields two). Set sub_dir to the folder holding
   that app, or "" when it is at the repo root. Omit build_cmd when none is
   needed. Return [] only if nothing runnable was found.
-- Use minimal official images (node:20-alpine, python:3.12-slim, golang:1.22-alpine)
+- Use minimal official images (node:20-alpine, python:3.12-slim, golang:1.22-alpine,
+  mcr.microsoft.com/dotnet/sdk:8.0 for .NET, eclipse-temurin:21-jdk for Java,
+  ruby:3.3-alpine, php:8.3-cli, rust:1-alpine). Match the image to the manifest
+  you were given, not to the repository name.
 - Separate containers for databases (postgres:16-alpine, mongo:7, redis:7-alpine)
 - Next.js: node:20-alpine, expose 3000/tcp
 - Hardhat/Foundry: set has_smart_contracts=true
@@ -282,19 +309,10 @@ Rules:
 		return nil, err
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		"https://api.groq.com/openai/v1/chat/completions", bytes.NewReader(bodyBytes))
-	if err != nil {
-		return nil, err
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+s.apiKey)
-
-	resp, err := http.DefaultClient.Do(httpReq)
+	respBody, err := groq.Post(ctx, s.apiKey, bodyBytes, nil)
 	if err != nil {
 		return nil, fmt.Errorf("groq api: %w", err)
 	}
-	defer resp.Body.Close()
 
 	var apiResp struct {
 		Choices []struct {
@@ -306,7 +324,7 @@ Rules:
 			Message string `json:"message"`
 		} `json:"error"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
+	if err := json.Unmarshal(respBody, &apiResp); err != nil {
 		return nil, fmt.Errorf("decode groq response: %w", err)
 	}
 	if apiResp.Error != nil {

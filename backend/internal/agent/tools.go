@@ -294,3 +294,74 @@ func buildSystemPrompt(envVars map[string]string) string {
 	sb.WriteString("```\n")
 	return sb.String()
 }
+
+// --- Phase-based tool selection ---
+//
+// Tool definitions are the single largest fixed cost in every Groq request: the
+// whole catalogue is re-serialized and re-sent on all ~20+ turns of a deploy, so
+// on the free tier it dominates the per-minute token budget. The model never
+// needs every tool at once, though — the pipeline is strictly ordered. Sending
+// only the tools that matter for the session's current phase cuts that fixed
+// cost on every turn without changing what the agent can do next.
+
+// toolIndex maps a tool's function name to its full definition, for quickly
+// assembling a phase-specific subset.
+var toolIndex = func() map[string]map[string]any {
+	m := make(map[string]map[string]any, len(toolDefinitions))
+	for _, t := range toolDefinitions {
+		fn, ok := t["function"].(map[string]any)
+		if !ok {
+			continue
+		}
+		if name, ok := fn["name"].(string); ok && name != "" {
+			m[name] = t
+		}
+	}
+	return m
+}()
+
+// planningTools are all the model needs before any container exists: scan the
+// repo, pick a provider, present the plan, and (once confirmed) create the first
+// container. create_container is the bridge into the execution phase.
+var planningTools = []string{
+	"analyze_repo", "select_provider", "generate_deployment_plan", "create_container",
+}
+
+// executionOnlyExclude names the planning-only tools that become dead weight once
+// a container is up — the agent does not re-plan mid-deploy, so re-sending these
+// every execution turn only burns tokens.
+var executionOnlyExclude = map[string]bool{
+	"analyze_repo":             true,
+	"select_provider":          true,
+	"generate_deployment_plan": true,
+}
+
+// pickTools returns the named tool definitions, in the given order, skipping any
+// name that is not registered.
+func pickTools(names ...string) []map[string]any {
+	out := make([]map[string]any, 0, len(names))
+	for _, n := range names {
+		if t, ok := toolIndex[n]; ok {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// executionTools is the full catalogue minus the planning-only tools, in the
+// original ordering.
+func executionTools() []map[string]any {
+	out := make([]map[string]any, 0, len(toolDefinitions))
+	for _, t := range toolDefinitions {
+		fn, ok := t["function"].(map[string]any)
+		if !ok {
+			continue
+		}
+		name, _ := fn["name"].(string)
+		if executionOnlyExclude[name] {
+			continue
+		}
+		out = append(out, t)
+	}
+	return out
+}

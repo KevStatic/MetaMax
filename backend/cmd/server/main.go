@@ -81,11 +81,16 @@ func main() {
 	}
 
 	httpSrv := &http.Server{
-		Addr:         addr,
-		Handler:      srv.Router(),
-		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 0,
-		IdleTimeout:  120 * time.Second,
+		Addr:    addr,
+		Handler: srv.Router(),
+		// ReadHeaderTimeout, not ReadTimeout: ReadTimeout puts a deadline on the
+		// whole exchange, so the connection is torn down while a slow handler is
+		// still working — a repo scan waiting on the model would die at 30s with
+		// "socket hang up", surfacing to the browser as a 500. Bounding only the
+		// headers still turns away slowloris clients.
+		ReadHeaderTimeout: 30 * time.Second,
+		WriteTimeout:      0,
+		IdleTimeout:       120 * time.Second,
 	}
 
 	quit := make(chan os.Signal, 1)

@@ -66,8 +66,8 @@ func Load() *Config {
 		DockerHost:  getEnv("DOCKER_HOST", "unix:///var/run/docker.sock"),
 
 		GroqAPIKey: getEnv("GROQ_API_KEY", ""),
-		ScanModel:  getEnv("SCAN_MODEL", "llama-3.3-70b-versatile"),
-		AgentModel: getEnv("AGENT_MODEL", "llama-3.3-70b-versatile"),
+		ScanModel:  getEnv("SCAN_MODEL", "openai/gpt-oss-120b"),
+		AgentModel: getEnv("AGENT_MODEL", "openai/gpt-oss-120b"),
 
 		DeployDomain: getEnv("DEPLOY_DOMAIN", ""),
 

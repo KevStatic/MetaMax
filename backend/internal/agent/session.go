@@ -1,12 +1,10 @@
 package agent
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"math/big"
 	"net/http"
@@ -17,6 +15,7 @@ import (
 
 	"github.com/shreejaykurhade/MetaMax/backend/internal/chain"
 	"github.com/shreejaykurhade/MetaMax/backend/internal/container"
+	"github.com/shreejaykurhade/MetaMax/backend/internal/groq"
 	"github.com/shreejaykurhade/MetaMax/backend/internal/scanner"
 )
 
@@ -207,7 +206,7 @@ type groqResponse struct {
 // NewSession creates a new agent session.
 func NewSession(cfg SessionConfig) *Session {
 	if cfg.Model == "" {
-		cfg.Model = "llama-3.3-70b-versatile"
+		cfg.Model = "openai/gpt-oss-120b"
 	}
 	if cfg.EnvVars == nil {
 		cfg.EnvVars = map[string]string{}
@@ -270,6 +269,7 @@ func (s *Session) Run(ctx context.Context, userPrompt string) error {
 	s.StageEnter(StageAnalyzing, "Reading the workload prompt and planning the deployment")
 
 	for {
+		compactToolHistory(messages)
 		log.Printf("[session %s] calling Groq (turn %d)...", s.ID, len(messages))
 		resp, err := s.callGroq(ctx, messages)
 		if err != nil {
@@ -360,10 +360,12 @@ func (s *Session) Run(ctx context.Context, userPrompt string) error {
 				b, _ := json.Marshal(result)
 				resultContent = string(b)
 			}
+			// The model's copy of the result is capped to head+tail; the full
+			// result stays in the Action above for the Merkle proof and audit log.
 			messages = append(messages, groqMessage{
 				Role:       "tool",
 				ToolCallID: tc.ID,
-				Content:    resultContent,
+				Content:    truncateForModel(resultContent),
 			})
 		}
 	}
@@ -397,6 +399,28 @@ func (s *Session) Run(ctx context.Context, userPrompt string) error {
 	}
 	s.emit(doneEvent)
 	return nil
+}
+
+// destroyContainer removes a container the session created.
+//
+// create_container registers containers as comput3-<team>-<name>, but the model
+// refers back to them by the bare name it chose, which the daemon cannot
+// resolve. Try the reference as given — that covers real container IDs — then
+// fall back to the qualified name.
+func (s *Session) destroyContainer(ctx context.Context, ref string) error {
+	if ref == "" {
+		return fmt.Errorf("container_id is required")
+	}
+	err := s.mgr.Destroy(ctx, ref)
+	if err == nil || strings.HasPrefix(ref, "comput3-") || s.TeamID == "" {
+		return err
+	}
+	if qualified := fmt.Sprintf("comput3-%s-%s", s.TeamID, ref); qualified != ref {
+		if retryErr := s.mgr.Destroy(ctx, qualified); retryErr == nil {
+			return nil
+		}
+	}
+	return err
 }
 
 // executeTool dispatches named tool calls.
@@ -550,7 +574,7 @@ func (s *Session) executeTool(ctx context.Context, name string, input map[string
 		return map[string]string{"logs": logs}, err
 
 	case "destroy_container":
-		return nil, s.mgr.Destroy(ctx, stringField(input, "container_id"))
+		return nil, s.destroyContainer(ctx, stringField(input, "container_id"))
 
 	case "clone_repo":
 		id := stringField(input, "container_id")
@@ -600,39 +624,42 @@ func (s *Session) executeTool(ctx context.Context, name string, input map[string
 	}
 }
 
+// toolsForState returns the tool subset the model should see this turn. Before a
+// container exists the agent is still planning, so it only needs the planning
+// tools; once a container is up it needs the execution tools but never the
+// planning ones again. Sending the smaller set on every turn is the biggest
+// single per-request saving, since the tool block is re-sent on every turn.
+func (s *Session) toolsForState() []map[string]any {
+	if s.lastContainerID == "" {
+		return pickTools(planningTools...)
+	}
+	return executionTools()
+}
+
 // callGroq sends the conversation to the Groq chat completions API (OpenAI-compatible).
 func (s *Session) callGroq(ctx context.Context, messages []groqMessage) (*groqResponse, error) {
+	tools := s.toolsForState()
 	req := groqRequest{
 		Model:     s.model,
 		MaxTokens: 8192,
 		Messages:  messages,
-		Tools:     toolDefinitions,
+		Tools:     tools,
 	}
 	body, err := json.Marshal(req)
 	if err != nil {
 		return nil, err
 	}
+	logRequestSize(s.ID, body, messages, tools)
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		"https://api.groq.com/openai/v1/chat/completions", bytes.NewReader(body))
+	respBody, err := groq.Post(ctx, s.groqAPIKey, body, func(wait time.Duration, attempt int, reason string) {
+		log.Printf("[session %s] groq %s, retrying in %.1fs (attempt %d)", s.ID, reason, wait.Seconds(), attempt)
+		s.emit(Event{
+			Type:    "message",
+			Message: fmt.Sprintf("Model %s — retrying in %.0fs...", reason, wait.Seconds()),
+		})
+	})
 	if err != nil {
 		return nil, err
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+s.groqAPIKey)
-
-	httpResp, err := http.DefaultClient.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("groq request: %w", err)
-	}
-	defer httpResp.Body.Close()
-
-	respBody, err := io.ReadAll(httpResp.Body)
-	if err != nil {
-		return nil, err
-	}
-	if httpResp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("groq error %d: %s", httpResp.StatusCode, string(respBody))
 	}
 
 	var resp groqResponse
@@ -646,6 +673,80 @@ func (s *Session) callGroq(ctx context.Context, messages []groqMessage) (*groqRe
 		return nil, fmt.Errorf("groq: empty choices")
 	}
 	return &resp, nil
+}
+
+// --- Context-size management ---
+//
+// Two forces grow a request over a deploy: the tool block (handled by phase
+// gating in toolsForState) and the conversation history. History growth is
+// dominated by tool results — a single build log (npm ci, compilation) can run
+// to tens of kilobytes and, left whole, is re-sent on every later turn. These
+// helpers bound that: each result is capped to head+tail as it enters history,
+// and all but the most recent few are collapsed to a stub before each call.
+
+const (
+	// maxToolResultChars is the largest tool result fed back to the model. Above
+	// it, only the head and tail are kept — enough to see the command that ran
+	// and its final status — and the middle is dropped.
+	maxToolResultChars = 2000
+	toolResultHead     = 1200
+	toolResultTail     = 600
+
+	// keepVerbatimResults is how many of the most recent tool results stay full
+	// in the conversation. Older results are stubbed: the assistant's own tool
+	// call (name + arguments) remains in history, so the model still knows what
+	// ran — it just no longer needs the verbose output many turns later.
+	keepVerbatimResults = 6
+
+	toolResultStub = "[earlier tool result omitted to conserve context]"
+)
+
+// truncateForModel shrinks an oversized tool result to its head and tail, noting
+// how many bytes were elided.
+func truncateForModel(s string) string {
+	if len(s) <= maxToolResultChars {
+		return s
+	}
+	elided := len(s) - toolResultHead - toolResultTail
+	return fmt.Sprintf("%s\n...[%d bytes elided]...\n%s", s[:toolResultHead], elided, s[len(s)-toolResultTail:])
+}
+
+// compactToolHistory collapses every tool result except the most recent
+// keepVerbatimResults into a stub, in place. This bounds how large the
+// conversation can grow over a long deploy: without it every past result is
+// re-sent on every remaining turn. It is idempotent — an already-stubbed result
+// is left alone — so it is safe to call before every request.
+func compactToolHistory(messages []groqMessage) {
+	seen := 0
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role != "tool" {
+			continue
+		}
+		seen++
+		if seen <= keepVerbatimResults {
+			continue
+		}
+		if messages[i].Content != toolResultStub {
+			messages[i].Content = toolResultStub
+		}
+	}
+}
+
+// estTokens is a rough proxy for the billed token count — Groq uses real BPE
+// tokens, but bytes/4 tracks the trend closely enough to watch the effect of
+// trimming from turn to turn in the logs.
+func estTokens(n int) int { return n / 4 }
+
+// logRequestSize records the size of each outbound request so the token cost of
+// a deploy can be measured directly: total request bytes, the estimated token
+// count, and how much of that is the (phase-gated) tool block versus the full
+// catalogue it was trimmed from.
+func logRequestSize(id string, body []byte, messages []groqMessage, tools []map[string]any) {
+	sentTools, _ := json.Marshal(tools)
+	fullTools, _ := json.Marshal(toolDefinitions)
+	log.Printf("[session %s] groq request: %d msgs, %d bytes (~%d tok) | tools %d/%d sent, %d/%d bytes",
+		id, len(messages), len(body), estTokens(len(body)),
+		len(tools), len(toolDefinitions), len(sentTools), len(fullTools))
 }
 
 // selectProviderFromRegistry reads the ProviderRegistry directly, picks the cheapest

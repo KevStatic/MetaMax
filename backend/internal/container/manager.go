@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -21,6 +21,11 @@ import (
 	"github.com/docker/go-connections/nat"
 	dockerclient "github.com/moby/moby/client"
 )
+
+// CommandTimeout bounds a single in-container command. Installs and builds on
+// a cold cache are slow, but a command still has to fail eventually rather than
+// wedge the whole deployment session.
+const CommandTimeout = 15 * time.Minute
 
 type PackageManager string
 
@@ -138,6 +143,7 @@ func (m *Manager) CreateContainer(ctx context.Context, opts CreateOpts) (*Contai
 	exposedPorts := nat.PortSet{}
 	portBindings := nat.PortMap{}
 
+	usedPorts := m.usedHostPorts(ctx)
 	for _, p := range opts.Ports {
 		portStr := strings.TrimSuffix(p, "/tcp")
 		port, err := nat.NewPort("tcp", portStr)
@@ -146,7 +152,9 @@ func (m *Manager) CreateContainer(ctx context.Context, opts CreateOpts) (*Contai
 		}
 		exposedPorts[port] = struct{}{}
 		hostPort := port.Port()
-		if !isPortAvailable(hostPort) {
+		if usedPorts[hostPort] {
+			// Taken on the daemon; let Docker assign a free port instead of
+			// failing the whole deployment on a collision.
 			hostPort = ""
 		}
 		portBindings[port] = []nat.PortBinding{{HostIP: "0.0.0.0", HostPort: hostPort}}
@@ -442,23 +450,69 @@ func (m *Manager) execWithOutput(ctx context.Context, containerID string, cmd []
 	}
 	defer attach.Close()
 
-	var sb strings.Builder
-	io.Copy(&sb, attach.Reader)
+	// Read the hijacked stream on its own goroutine. The daemon does not always
+	// close it when the command ends — against a remote daemon it can stay open
+	// indefinitely — so a bare io.Copy here would block forever on a command
+	// that has already exited. Completion is decided by exec inspect instead,
+	// and the connection is closed to unblock the reader.
+	var (
+		mu  sync.Mutex
+		buf strings.Builder
+	)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		chunk := make([]byte, 4096)
+		for {
+			n, rerr := attach.Reader.Read(chunk)
+			if n > 0 {
+				mu.Lock()
+				buf.Write(chunk[:n])
+				mu.Unlock()
+			}
+			if rerr != nil {
+				return
+			}
+		}
+	}()
 
+	output := func() string {
+		mu.Lock()
+		defer mu.Unlock()
+		return buf.String()
+	}
+
+	deadline := time.After(CommandTimeout)
 	for {
-		inspect, err := m.client.ContainerExecInspect(ctx, execID.ID)
-		if err != nil {
-			return sb.String(), err
+		inspect, ierr := m.client.ContainerExecInspect(ctx, execID.ID)
+		if ierr != nil {
+			return output(), ierr
 		}
 		if !inspect.Running {
-			if inspect.ExitCode != 0 {
-				return sb.String(), fmt.Errorf("exited %d: %s", inspect.ExitCode, sb.String())
+			// Give the reader a moment to drain what is still buffered, then
+			// close the connection so it cannot sit on an open stream.
+			select {
+			case <-done:
+			case <-time.After(2 * time.Second):
 			}
-			break
+			attach.Close()
+			out := output()
+			if inspect.ExitCode != 0 {
+				return out, fmt.Errorf("exited %d: %s", inspect.ExitCode, out)
+			}
+			return out, nil
 		}
-		time.Sleep(200 * time.Millisecond)
+
+		select {
+		case <-ctx.Done():
+			attach.Close()
+			return output(), ctx.Err()
+		case <-deadline:
+			attach.Close()
+			return output(), fmt.Errorf("command exceeded %s", CommandTimeout)
+		case <-time.After(200 * time.Millisecond):
+		}
 	}
-	return sb.String(), nil
 }
 
 func (m *Manager) exec(ctx context.Context, containerID string, cmd []string) error {
@@ -479,14 +533,25 @@ func (m *Manager) exec(ctx context.Context, containerID string, cmd []string) er
 	return nil
 }
 
-func isPortAvailable(port string) bool {
-	if port == "" {
-		return false
-	}
-	ln, err := net.Listen("tcp", ":"+port)
+// usedHostPorts returns the host ports already published on the Docker daemon.
+//
+// Workload containers are created on a remote daemon (dind), so probing with a
+// local net.Listen would test this process's own namespace and miss every
+// conflict that actually matters — the second deployment asking for port 3000
+// would be handed it and then fail to start.
+func (m *Manager) usedHostPorts(ctx context.Context) map[string]bool {
+	used := make(map[string]bool)
+	list, err := m.client.ContainerList(ctx, container.ListOptions{All: true})
 	if err != nil {
-		return false
+		log.Printf("[container] list for port check: %v", err)
+		return used
 	}
-	ln.Close()
-	return true
+	for _, c := range list {
+		for _, p := range c.Ports {
+			if p.PublicPort != 0 {
+				used[strconv.Itoa(int(p.PublicPort))] = true
+			}
+		}
+	}
+	return used
 }
