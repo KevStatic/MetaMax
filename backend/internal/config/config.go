@@ -1,6 +1,9 @@
 package config
 
-import "os"
+import (
+	"log"
+	"os"
+)
 
 // Config holds all runtime configuration loaded from environment variables.
 type Config struct {
@@ -60,6 +63,17 @@ type Config struct {
 
 // Load reads all configuration from environment variables with sensible defaults.
 func Load() *Config {
+	// The vault secret keys AES-256-GCM secret encryption. Never leave it empty:
+	// an empty key made encryptSecret fall back to storing plaintext while the UI
+	// still claimed "encrypted at rest". Fall back to a built-in dev key so
+	// encryption always happens, but make the misconfiguration loud — the dev key
+	// is predictable and unsafe for real data.
+	vaultSecret := getEnv("VAULT_MASTER_SECRET", "")
+	if vaultSecret == "" {
+		vaultSecret = "metamax-insecure-dev-vault-key"
+		log.Printf("[config] WARNING: VAULT_MASTER_SECRET is unset — using an insecure built-in dev key so secrets are still encrypted, not stored as plaintext. Set VAULT_MASTER_SECRET before handling real secrets.")
+	}
+
 	return &Config{
 		Port:        getEnv("PORT", "8080"),
 		DatabaseURL: getEnv("DATABASE_URL", "postgres://comput3:comput3@localhost:5432/comput3?sslmode=disable"),
@@ -82,7 +96,7 @@ func Load() *Config {
 		PaymentsDisabled:         getEnv("PAYMENTS_DISABLED", "") == "true",
 		ProviderMode:             getEnv("PROVIDER_MODE", "") == "true",
 		ProviderWalletPrivateKey: getEnv("PROVIDER_WALLET_PRIVATE_KEY", ""),
-		VaultMasterSecret:       getEnv("VAULT_MASTER_SECRET", ""),
+		VaultMasterSecret:       vaultSecret,
 		JWTSecret:               getEnv("JWT_SECRET", getEnv("VAULT_MASTER_SECRET", "comput3-dev-secret")),
 
 		ZeroG_RPC_URL:     getEnv("ZG_RPC_URL", ""),

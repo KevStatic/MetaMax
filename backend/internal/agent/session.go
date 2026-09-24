@@ -163,6 +163,7 @@ type Session struct {
 	events          chan Event
 	confirmCh       chan struct{}
 	lastContainerID string
+	lastEncrypted   bool // whether the last container's /app volume is actually LUKS-encrypted
 	stageMu         sync.Mutex
 	stagesSeen      map[string]bool
 }
@@ -371,7 +372,11 @@ func (s *Session) Run(ctx context.Context, userPrompt string) error {
 	}
 
 	// Execution is over — every tool call is now a leaf in the proof.
-	s.StageDone(StageExecuting, fmt.Sprintf("%d action(s) executed inside the encrypted container", len(s.Actions)), "")
+	containerDesc := "container"
+	if s.lastEncrypted {
+		containerDesc = "encrypted container"
+	}
+	s.StageDone(StageExecuting, fmt.Sprintf("%d action(s) executed inside the %s", len(s.Actions), containerDesc), "")
 
 	// Compute Merkle root over all action hashes
 	s.StageEnter(StageProof, "Hashing every action and building the Merkle tree")
@@ -500,7 +505,7 @@ func (s *Session) executeTool(ctx context.Context, name string, input map[string
 		return plan, nil
 
 	case "create_container":
-		s.StageEnter(StageEncrypting, "Provisioning a LUKS2-encrypted volume for the workload")
+		s.StageEnter(StageEncrypting, "Provisioning the workload's storage volume")
 		opts := container.CreateOpts{
 			TeamID:    s.TeamID,
 			SessionID: s.ID,
@@ -524,8 +529,16 @@ func (s *Session) executeTool(ctx context.Context, name string, input map[string
 		if info != nil {
 			s.mgr.RegisterDeploy(info.ID, info.Ports)
 			s.lastContainerID = info.ID
-			s.StageDone(StageEncrypting, fmt.Sprintf("Encrypted container %s ready — key never leaves the vault", shortID(info.ID)), "")
-			s.StageEnter(StageExecuting, "Running the workload inside the encrypted container")
+			s.lastEncrypted = info.Encrypted
+			if info.Encrypted {
+				s.StageDone(StageEncrypting, fmt.Sprintf("Encrypted container %s ready — LUKS2 key never leaves the vault", shortID(info.ID)), "")
+				s.StageEnter(StageExecuting, "Running the workload inside the encrypted container")
+			} else {
+				// LUKS fell back to a plain volume — say so rather than claim
+				// encryption the workload does not have.
+				s.StageSkipped(StageEncrypting, "volume encryption unavailable on this host — running with container isolation only")
+				s.StageEnter(StageExecuting, "Running the workload inside the container")
+			}
 		}
 		return info, nil
 

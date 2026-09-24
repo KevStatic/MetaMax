@@ -1,6 +1,7 @@
 package store
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -368,6 +369,7 @@ func (s *Store) UpsertActionLog(ctx context.Context, sessionID, teamID string, a
 	if err != nil {
 		return fmt.Errorf("marshal actions: %w", err)
 	}
+	data = stripJSONNul(data)
 	_, err = s.pool.Exec(ctx, `
 		INSERT INTO action_logs (session_id, team_id, actions)
 		VALUES ($1, $2, $3)
@@ -378,6 +380,49 @@ func (s *Store) UpsertActionLog(ctx context.Context, sessionID, teamID string, a
 			`UPDATE action_logs SET actions=$1 WHERE session_id=$2`, data, sessionID)
 	}
 	return err
+}
+
+// stripJSONNul removes escaped NUL code points from marshaled JSON.
+//
+// Postgres jsonb cannot store the NUL code point: a NUL byte in captured tool
+// output marshals to its six-byte JSON escape (a backslash, the letter u, then
+// four zeros), which the column rejects with SQLSTATE 22P05 and fails the whole
+// write, so the audit trail silently never persists. NUL never carries meaning
+// in stdout or stderr, so it is dropped.
+//
+// The scan is escape-aware, so only an escape produced by a real NUL is removed.
+// A backslash in the source text is itself doubled by the JSON encoder, so a
+// six-byte escape that merely appears as text in tool output is preserved: a
+// naive replace would corrupt it, because the doubled-backslash form contains
+// the same pattern one byte in. The backslash byte is written as 0x5c rather
+// than a rune literal so this file never carries a stray escape of its own.
+func stripJSONNul(data []byte) []byte {
+	const backslash = 0x5c
+	nulEscape := []byte{backslash, 'u', '0', '0', '0', '0'}
+	if !bytes.Contains(data, nulEscape) {
+		return data
+	}
+	out := make([]byte, 0, len(data))
+	for i := 0; i < len(data); {
+		if data[i] == backslash {
+			// A doubled backslash is two literal chars — copy both so what
+			// follows is read as text, not as the start of an escape.
+			if i+1 < len(data) && data[i+1] == backslash {
+				out = append(out, backslash, backslash)
+				i += 2
+				continue
+			}
+			// A real NUL marshals to the six-byte escape — drop it whole.
+			if i+5 < len(data) && data[i+1] == 'u' &&
+				data[i+2] == '0' && data[i+3] == '0' && data[i+4] == '0' && data[i+5] == '0' {
+				i += 6
+				continue
+			}
+		}
+		out = append(out, data[i])
+		i++
+	}
+	return out
 }
 
 func (s *Store) GetActionLog(ctx context.Context, sessionID string) (*ActionLog, error) {

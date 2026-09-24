@@ -12,13 +12,24 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 )
 
-// Endpoint is Groq's OpenAI-compatible chat completions URL.
-const Endpoint = "https://api.groq.com/openai/v1/chat/completions"
+// Endpoint is the OpenAI-compatible chat completions URL. It defaults to Groq
+// but honors GROQ_BASE_URL (an OpenAI-compatible base such as
+// http://host:1234/openai/v1) so a mock server or an alternative provider can be
+// substituted — the smoke test and any future fallback provider rely on this.
+// It is a package var, so a white-box test can also set it directly.
+var Endpoint = func() string {
+	if base := strings.TrimRight(os.Getenv("GROQ_BASE_URL"), "/"); base != "" {
+		return base + "/chat/completions"
+	}
+	return "https://api.groq.com/openai/v1/chat/completions"
+}()
 
 const (
 	maxAttempts = 5

@@ -122,7 +122,7 @@ export default function SecretsPage() {
           </div>
 
           <p style={{ marginTop: 16, fontSize: 12, color: "#4b5563" }}>
-            Secrets are LUKS2-encrypted at rest and injected as environment variables inside the secure enclave.
+            Secrets are AES-256-GCM-encrypted at rest and injected as environment variables into your containers.
           </p>
         </div>
       </main>
