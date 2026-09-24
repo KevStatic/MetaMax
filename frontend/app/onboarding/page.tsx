@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Sidebar } from "@/components/Sidebar";
 import { apiFetch } from "@/lib/api";
 import { useAuth, STORAGE } from "@/lib/AuthContext";
 
