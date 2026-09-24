@@ -16,7 +16,10 @@ import (
 // This is safe to store in the database; the only way to decrypt is with the same masterSecret.
 func encryptSecret(masterSecret, plaintext string) (string, error) {
 	if masterSecret == "" {
-		return plaintext, nil // dev mode: no encryption when master secret not set
+		// Refuse to store a secret we cannot encrypt rather than silently
+		// persisting plaintext under an "encrypted at rest" label. config.Load
+		// guarantees a non-empty key, so this is a defensive guard.
+		return "", fmt.Errorf("secrets encryption not configured: VAULT_MASTER_SECRET is empty")
 	}
 	key := sha256.Sum256([]byte(masterSecret))
 	block, err := aes.NewCipher(key[:])

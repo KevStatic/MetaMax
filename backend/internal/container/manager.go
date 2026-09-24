@@ -70,6 +70,10 @@ type ContainerInfo struct {
 	Status      string
 	Ports       map[string]string
 	StoragePath string
+	// Encrypted is the true state of the /app volume: LUKS succeeded. It is
+	// false whenever setup fell back to a plain directory, so callers can
+	// report what actually happened rather than assuming encryption.
+	Encrypted bool
 }
 
 // HealthStatus reports whether a container is running.
@@ -235,6 +239,7 @@ func (m *Manager) CreateContainer(ctx context.Context, opts CreateOpts) (*Contai
 		Status:      "running",
 		Ports:       ports,
 		StoragePath: storageDir,
+		Encrypted:   luksErr == nil,
 	}, nil
 }
 

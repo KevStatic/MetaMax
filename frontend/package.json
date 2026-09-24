@@ -6,7 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "eslint ."
   },
   "dependencies": {
     "@rainbow-me/rainbowkit": "^2.2.10",
@@ -24,6 +24,7 @@
     "wagmi": "^2.19.5"
   },
   "devDependencies": {
+    "@eslint/eslintrc": "^3.3.7",
     "@types/node": "^22",
     "@types/react": "^19",
     "@types/react-dom": "^19",

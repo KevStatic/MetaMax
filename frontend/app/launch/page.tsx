@@ -28,7 +28,7 @@ const RED = "#ef4444";
 
 const DEFAULT_REPO = "https://github.com/vercel/next.js";
 const DEFAULT_PROMPT =
-  "Deploy this repository as a production web service on port 3000. Pick the best provider on Monad, run it in an encrypted container, and attest the execution proof on-chain.";
+  "Deploy this repository as a production web service on port 3000. Pick the best provider on Monad, run it in an isolated container, and attest the execution proof on-chain.";
 
 type StageState = {
   status: StageStatus;

@@ -404,7 +404,7 @@ function DeployPageInner() {
     { id: ["pick"] as Phase[], label: "Detect Stack", sub: scan ? `${scan.options.length} option(s) found` : "Auto-detect framework" },
     { id: ["envvars"] as Phase[], label: "Environment Variables", sub: envVars.length > 0 ? `${envVars.length} variable(s) set` : "API keys, DB URLs, secrets" },
     { id: ["prompt"] as Phase[], label: "Deployment Prompt", sub: deployPrompt ? deployPrompt.slice(0, 36) + "…" : "Describe what to deploy" },
-    { id: ["creating","streaming","awaiting_confirm","building","done"] as Phase[], label: "AI Agent Deploy", sub: phase === "done" ? "Live ✓" : phase === "awaiting_confirm" ? "Awaiting confirmation" : ["creating","streaming","building"].includes(phase) ? "Running…" : "Encrypted container" },
+    { id: ["creating","streaming","awaiting_confirm","building","done"] as Phase[], label: "AI Agent Deploy", sub: phase === "done" ? "Live ✓" : phase === "awaiting_confirm" ? "Awaiting confirmation" : ["creating","streaming","building"].includes(phase) ? "Running…" : "Isolated container" },
   ];
 
   const isLivePhase = ["streaming", "awaiting_confirm", "building"].includes(phase);
@@ -428,7 +428,7 @@ function DeployPageInner() {
             <div>
               <p style={{ fontSize: 28, fontWeight: 900, color: "#f9fafb", lineHeight: 1.2 }}>New Deployment</p>
               <p style={{ fontSize: 13, fontFamily: "monospace", color: "#6b7280", marginTop: 4 }}>
-                AI agent · encrypted container · on-chain attestation
+                AI agent · isolated container · on-chain attestation
               </p>
             </div>
             <div style={{ display: "flex", gap: 10 }}>

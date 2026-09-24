@@ -39,7 +39,7 @@ function useClock() {
 }
 
 export default function Home() {
-  const { address, isAuthenticated, isConnected, teamId, teamName, isNewAccount, hydrated } = useAuth();
+  const { address, isAuthenticated, teamId, teamName, isNewAccount, hydrated } = useAuth();
   const router = useRouter();
   const { data: balance } = useBalance({
     address: address as `0x${string}` | undefined,

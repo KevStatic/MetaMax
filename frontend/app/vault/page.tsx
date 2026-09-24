@@ -3,10 +3,8 @@
 import { useState } from "react";
 import { Sidebar } from "@/components/Sidebar";
 import { apiFetch } from "@/lib/api";
-import { useAuth } from "@/lib/AuthContext";
 
 export default function VaultPage() {
-  const { address } = useAuth();
   const [nonce, setNonce] = useState("");
   const [vaultKey, setVaultKey] = useState("");
   const [containerId, setContainerId] = useState("");

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { Sidebar } from "@/components/Sidebar";
-import { useAuth, STORAGE } from "@/lib/AuthContext";
+import { useAuth } from "@/lib/AuthContext";
 
 export default function SettingsPage() {
   const { address, teamName, teamId } = useAuth();

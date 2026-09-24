@@ -38,7 +38,6 @@ export default function SessionsPage() {
 
   const running = sessions.filter((s) => s.state === "running").length;
   const completed = sessions.filter((s) => s.state === "completed").length;
-  const failed = sessions.filter((s) => s.state === "failed").length;
 
   return (
     <div
